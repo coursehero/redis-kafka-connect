@@ -66,6 +66,14 @@ public class RedisSourceConfig extends RedisConfig {
 	public static final String STREAM_CONSUMER_GROUP_DEFAULT = "kafka-consumer-group";
 	public static final String STREAM_CONSUMER_GROUP_DOC = "Stream consumer group";
 
+    public static final String STREAM_DELIVERY_TYPE_AT_MOST_ONCE = "at-most-once";
+    public static final String STREAM_DELIVERY_TYPE_AT_LEAST_ONCE = "at-least-once";
+
+    public static final String STREAM_DELIVERY_TYPE_CONFIG = "redis.stream.delivery.type";
+    public static final String STREAM_DELIVERY_TYPE_DEFAULT = STREAM_DELIVERY_TYPE_AT_LEAST_ONCE;
+    public static final String STREAM_DELIVERY_TYPE_DOC =
+        "The delivery guarantee, either 'at-least-once' or 'at-most-once'";
+
 	public static final String STREAM_CONSUMER_NAME_CONFIG = "redis.stream.consumer.name";
 	public static final String STREAM_CONSUMER_NAME_DEFAULT = "consumer-" + TOKEN_TASK;
 	public static final String STREAM_CONSUMER_NAME_DOC = "A format string for the stream consumer, which may contain '"
@@ -85,6 +93,7 @@ public class RedisSourceConfig extends RedisConfig {
 	private final Long batchSize;
 	private final Long streamBlock;
 	private final String topicName;
+    private final String streamDeliveryType;
 
 	public RedisSourceConfig(Map<?, ?> originals) {
 		super(new RedisSourceConfigDef(), originals);
@@ -97,6 +106,7 @@ public class RedisSourceConfig extends RedisConfig {
 		this.streamConsumerGroup = getString(STREAM_CONSUMER_GROUP_CONFIG);
 		this.streamConsumerName = getString(STREAM_CONSUMER_NAME_CONFIG);
 		this.streamBlock = getLong(STREAM_BLOCK_CONFIG);
+        this.streamDeliveryType = getString(STREAM_DELIVERY_TYPE_CONFIG);
 	}
 
 	public ReaderType getReaderType() {
@@ -130,6 +140,10 @@ public class RedisSourceConfig extends RedisConfig {
 	public String getStreamConsumerName() {
 		return streamConsumerName;
 	}
+
+    public String getStreamDeliveryType() {
+        return streamDeliveryType;
+    }
 
 	public String getTopicName() {
 		return topicName;
@@ -170,6 +184,15 @@ public class RedisSourceConfig extends RedisConfig {
 			define(ConfigKeyBuilder.of(STREAM_BLOCK_CONFIG, ConfigDef.Type.LONG).defaultValue(STREAM_BLOCK_DEFAULT)
 					.importance(ConfigDef.Importance.LOW).documentation(STREAM_BLOCK_DOC)
 					.validator(ConfigDef.Range.atLeast(1L)).build());
+            define(
+                ConfigKeyBuilder.of(STREAM_DELIVERY_TYPE_CONFIG, ConfigDef.Type.STRING)
+                    .documentation(STREAM_DELIVERY_TYPE_DOC)
+                    .defaultValue(STREAM_DELIVERY_TYPE_DEFAULT)
+                    .importance(ConfigDef.Importance.MEDIUM)
+                    .validator(ConfigDef.ValidString.in(
+                        STREAM_DELIVERY_TYPE_AT_LEAST_ONCE,
+                        STREAM_DELIVERY_TYPE_AT_MOST_ONCE))
+                    .build());
 		}
 
 	}
@@ -179,25 +202,33 @@ public class RedisSourceConfig extends RedisConfig {
 		final int prime = 31;
 		int result = super.hashCode();
 		result = prime * result + Objects.hash(batchSize, keyPatterns, readerType, streamBlock, streamConsumerGroup,
-				streamConsumerName, streamName, streamOffset, topicName);
+            streamConsumerName,
+            streamName,
+            streamOffset,
+            topicName,
+            streamDeliveryType);
 		return result;
 	}
 
 	@Override
 	public boolean equals(Object obj) {
-		if (this == obj)
-			return true;
-		if (!super.equals(obj))
-			return false;
-		if (getClass() != obj.getClass())
-			return false;
-		RedisSourceConfig other = (RedisSourceConfig) obj;
+		if (this == obj) {
+            return true;
+        }
+		if (!super.equals(obj)) {
+            return false;
+        }
+		if (getClass() != obj.getClass()) {
+            return false;
+        }
+		final RedisSourceConfig other = (RedisSourceConfig) obj;
 		return Objects.equals(batchSize, other.batchSize) && Objects.equals(keyPatterns, other.keyPatterns)
 				&& readerType == other.readerType && Objects.equals(streamBlock, other.streamBlock)
 				&& Objects.equals(streamConsumerGroup, other.streamConsumerGroup)
 				&& Objects.equals(streamConsumerName, other.streamConsumerName)
 				&& Objects.equals(streamName, other.streamName) && Objects.equals(streamOffset, other.streamOffset)
-				&& Objects.equals(topicName, other.topicName);
+            && Objects.equals(topicName, other.topicName)
+            && Objects.equals(streamDeliveryType, other.streamDeliveryType);
 	}
 
 }
