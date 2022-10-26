@@ -25,6 +25,7 @@ class StreamMessageRecovery {
     private final RedisSourceConfig config;
     private final AckPolicy ackPolicy;
     private final StreamId recoveryId;
+    private StreamId startOffset = StreamId.ZERO;
     private boolean recovered = false;
 
     StreamMessageRecovery(
@@ -47,6 +48,29 @@ class StreamMessageRecovery {
             recoveryId = StreamId.ZERO;
         }
         this.recoveryId = recoveryId;
+    }
+
+    void initialize() throws Exception {
+        try (StatefulConnection<String, String> connection = pool.borrowObject()) {
+            final RedisStreamCommands<String, String> commands = Utils.sync(connection);
+            final List<Object> xinfoGroups = commands.xinfoGroups(config.getStreamName());
+            boolean found = false;
+            for (final Object groupInfoObj : xinfoGroups) {
+                final List<?> groupInfo = (List<?>) groupInfoObj;
+                for (int i = 0; i < groupInfo.size(); ++i) {
+                    if ("name".equals(String.valueOf(groupInfo.get(i)))) {
+                        if (config.getStreamConsumerGroup().equals(String.valueOf(groupInfo.get(i + 1)))) {
+                            found = true;
+                        }
+                    }
+                }
+            }
+            // Our consumer group doesn't yet exist, so we don't have anything to recover
+            if (!found) {
+                System.out.println("could not find consumer group " + config.getStreamConsumerGroup());
+                recovered = true;
+            }
+        }
     }
 
     /**
@@ -83,7 +107,7 @@ class StreamMessageRecovery {
         final ArrayList<StreamMessage<String, String>> needsAck = new ArrayList<>();
         final ArrayList<StreamMessage<String, String>> unprocessed = new ArrayList<>();
         final long batchSize = config.getBatchSize();
-        try (StatefulConnection<String, String> connection = pool.borrowObject()) {
+        try (final StatefulConnection<String, String> connection = pool.borrowObject()) {
             final RedisStreamCommands<String, String> commands = Utils.sync(connection);
             while (unprocessed.size() < batchSize) {
                 // XREADGROUP with any id other than '>' or '$' only returns pending messages,
@@ -92,7 +116,7 @@ class StreamMessageRecovery {
                     commands.xreadgroup(
                         consumer,
                         XReadArgs.Builder.count(batchSize - unprocessed.size()),
-                        StreamOffset.lastConsumed("0-0"));
+                        StreamOffset.from(config.getStreamName(), startOffset.toString()));
                 // If we don't have any more pending messages, we can XACK the ones needing
                 // to be XACK'd and return any unprocessed messages.
                 if (messages.isEmpty()) {
@@ -101,10 +125,11 @@ class StreamMessageRecovery {
                 if (ackPolicy == AckPolicy.AUTO) {
                     needsAck.addAll(messages);
                 } else {
-                    for (final StreamMessage<String, String> m : unprocessed) {
+                    for (final StreamMessage<String, String> m : messages) {
                         final StreamId msgId = StreamId.parse(m.getId());
                         if (msgId.compareTo(recoveryId) > 0) {
                             unprocessed.add(m);
+                            startOffset = StreamId.parse(m.getId());
                         } else {
                             needsAck.add(m);
                         }
@@ -118,6 +143,7 @@ class StreamMessageRecovery {
                             config.getStreamConsumerGroup(),
                         msgs.stream()
                         .map(StreamMessage::getId)
+                        .peek(x -> { System.out.println("XACK " + x); })
                         .collect(toList())
                         .toArray(new String[0])));
                 needsAck.clear();
@@ -163,9 +189,13 @@ class StreamMessageRecovery {
             return new StreamId(millis, sequence);
         }
 
+        public String toStreamId() {
+            return millis + "-" + sequence;
+        }
+
         @Override
         public String toString() {
-            return millis + "-" + sequence;
+            return toStreamId();
         }
 
         @Override

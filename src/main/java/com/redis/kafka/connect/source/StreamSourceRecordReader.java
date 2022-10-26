@@ -95,8 +95,14 @@ public class StreamSourceRecordReader extends AbstractSourceRecordReader<StreamM
                     .build())
 				.build();
 		reader.open(new ExecutionContext());
-        final String lastCommitted = (String) offset.get(OFFSET_FIELD);
+        final String lastCommitted;
+        if (offset == null) {
+            lastCommitted = null;
+        } else {
+            lastCommitted = (String) offset.get(OFFSET_FIELD);
+        }
         recovery = new StreamMessageRecovery(pool, consumer, config, ackPolicy, lastCommitted);
+        recovery.initialize();
     }
 
     // provided to allow overriding pool creation for testing.
