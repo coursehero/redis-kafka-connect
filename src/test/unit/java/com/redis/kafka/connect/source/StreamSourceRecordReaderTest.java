@@ -1,25 +1,15 @@
 package com.redis.kafka.connect.source;
 
-import static java.util.Collections.emptyMap;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.when;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
-import java.util.function.Consumer;
-import java.util.function.Supplier;
 import java.util.stream.Stream;
 
-import org.apache.commons.pool2.impl.GenericObjectPool;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
@@ -30,14 +20,9 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.ArgumentsProvider;
 import org.junit.jupiter.params.provider.ArgumentsSource;
-import org.mockito.Mock;
-import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import io.lettuce.core.StreamMessage;
-import io.lettuce.core.api.StatefulConnection;
-import io.lettuce.core.api.StatefulRedisConnection;
-import io.lettuce.core.api.sync.RedisCommands;
 
 @ExtendWith(MockitoExtension.class)
 class StreamSourceRecordReaderTest {
@@ -55,100 +40,6 @@ class StreamSourceRecordReaderTest {
         SchemaBuilder.struct().field(FIELD_ID, Schema.STRING_SCHEMA)
             .field(FIELD_BODY, SchemaBuilder.map(Schema.STRING_SCHEMA, Schema.STRING_SCHEMA).build())
             .field(FIELD_STREAM, Schema.STRING_SCHEMA).name(VALUE_SCHEMA_NAME).build();
-
-    @Mock(stubOnly = true)
-    GenericObjectPool<StatefulConnection<String, String>> pool;
-
-    @ParameterizedTest(name = "{index} {0}")
-    @ArgumentsSource(PollArgsProvider.class)
-    void testPoll(PollArgs args) throws Exception {
-        final StreamSourceRecordReader sut = new StreamSourceRecordReader(args.config, 0) {
-            @Override
-            GenericObjectPool<StatefulConnection<String, String>> createPool(RedisSourceConfig config) {
-                args.configurePool(pool);
-                return pool;
-            }
-        };
-        sut.open(args.connectOffset);
-
-        final List<StreamMessage<String, String>> got = sut.doPoll();
-        assertEquals(args.want, got);
-    }
-
-    static class PollArgsProvider implements ArgumentsProvider {
-
-        @SuppressWarnings("unchecked")
-        @Override
-        public Stream<PollArgs> provideArguments(ExtensionContext context) throws Exception {
-            return Arrays.<Supplier<PollArgs>>asList(/*() -> {
-                final String name = "single message new group";
-                final String id = "1-0";
-                return new PollArgs(
-                    name,
-                    new RedisSourceConfig(mapOf("redis.stream.name", name)),
-                    pool -> {
-                        final StatefulRedisConnection<String, String> conn =
-                            Mockito.mock(StatefulRedisConnection.class);
-                        when(wrapEx(pool::borrowObject)).thenReturn(conn);
-
-                        final RedisCommands<String, String> commands = Mockito.mock(RedisCommands.class);
-                        when(conn.sync()).thenReturn(commands);
-
-                        when(commands.xgroupCreate(Mockito.any(), Mockito.any(), Mockito.any())).thenReturn("0");
-                        when(commands.xreadgroup(Mockito.any(), Mockito.any(), Mockito.any()))
-                            .thenReturn(Arrays.asList(new StreamMessage<String, String>(name, id, emptyMap())));
-                    },
-                    Collections.emptyMap(),
-                    Arrays.<StreamMessage<String, String>>asList(
-                        new StreamMessage<String, String>(name, id, emptyMap()))
-                );
-            }*/).stream().map(Supplier::get);
-        }
-    }
-
-    static <T> T wrapEx(Callable<T> c) {
-        try {
-            return c.call();
-        } catch (final Exception e) {
-            throw new RuntimeException(e);
-        }
-
-    }
-
-    static class PollArgs implements Arguments {
-        String name;
-        RedisSourceConfig config;
-        Consumer<GenericObjectPool<StatefulConnection<String, String>>> poolSetup;
-        Map<String, Object> connectOffset;
-        List<StreamMessage<String, String>> want;
-
-        PollArgs(
-            String name,
-            RedisSourceConfig config,
-            Consumer<GenericObjectPool<StatefulConnection<String, String>>> poolSetup,
-            Map<String, Object> connectOffset,
-            List<StreamMessage<String, String>> want) {
-            this.name = name;
-            this.config = config;
-            this.poolSetup = poolSetup;
-            this.want = want;
-            this.connectOffset = connectOffset;
-        }
-
-        public void configurePool(GenericObjectPool<StatefulConnection<String, String>> pool) {
-            poolSetup.accept(pool);
-        }
-
-        @Override
-        public Object[] get() {
-            return new Object[] { this };
-        }
-
-        @Override
-        public String toString() {
-            return name;
-        }
-    }
 
     @ParameterizedTest
     @ArgumentsSource(ConvertArgsProvider.class)
