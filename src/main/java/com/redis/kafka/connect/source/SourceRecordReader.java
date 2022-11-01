@@ -8,15 +8,15 @@ import org.apache.kafka.connect.source.SourceRecord;
 
 public interface SourceRecordReader {
 
-    void open(Map<String, Object> offset) throws Exception;
+	void open(Map<String, Object> offset) throws Exception;
 
-    List<SourceRecord> poll();
+	List<SourceRecord> poll();
 
-    default void commit() throws InterruptedException {
-    }
+	default void commit() throws InterruptedException {
+	}
 
-    default void commitRecord(SourceRecord r, RecordMetadata m) throws InterruptedException {
-    }
+	default void commitRecord(SourceRecord r, RecordMetadata m) throws InterruptedException {
+	}
 
-    void close();
+	void close();
 }

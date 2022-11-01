@@ -51,8 +51,8 @@ public class KeySourceRecordReader extends AbstractSourceRecordReader<DataStruct
 	}
 
 	@Override
-    public void open(Map<String, Object> offset) throws Exception {
-		final RedisURI uri = config.uri();
+	public void open(Map<String, Object> offset) throws Exception {
+		RedisURI uri = config.uri();
 		this.client = config.client(uri);
 		this.pool = config.pool(client);
 		this.pubSubConnection = RedisModulesUtils.pubSubConnection(client);
@@ -97,8 +97,8 @@ public class KeySourceRecordReader extends AbstractSourceRecordReader<DataStruct
 
 	@Override
 	protected SourceRecord convert(DataStructure<String> input) {
-		final Map<String, ?> sourcePartition = new HashMap<>();
-		final Map<String, ?> sourceOffset = new HashMap<>();
+		Map<String, ?> sourcePartition = new HashMap<>();
+		Map<String, ?> sourceOffset = new HashMap<>();
 		return new SourceRecord(sourcePartition, sourceOffset, topic, null, KEY_SCHEMA, input.getKey(), schema(input),
 				input.getValue(), clock.instant().toEpochMilli());
 	}

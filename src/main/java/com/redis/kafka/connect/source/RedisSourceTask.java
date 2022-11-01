@@ -45,26 +45,26 @@ public class RedisSourceTask extends SourceTask {
 
 	@Override
 	public void start(Map<String, String> props) {
-        Map<String, Object> offset = null;
-        if (context != null) {
-            offset = context.offsetStorageReader().offset(Collections.emptyMap());
-        }
+		Map<String, Object> offset = null;
+		if (context != null) {
+			offset = context.offsetStorageReader().offset(Collections.emptyMap());
+		}
 		this.reader = reader(props);
 		try {
-            this.reader.open(offset);
-		} catch (final Exception e) {
+			this.reader.open(offset);
+		} catch (Exception e) {
 			throw new RetriableException("Could not open reader", e);
 		}
 	}
 
 	private SourceRecordReader reader(Map<String, String> props) {
-		final RedisSourceConfig sourceConfig = new RedisSourceConfig(props);
+		RedisSourceConfig sourceConfig = new RedisSourceConfig(props);
 		if (sourceConfig.getReaderType() == RedisSourceConfig.ReaderType.STREAM) {
-			final String taskIdString = props.get(TASK_ID);
-			final int taskId = taskIdString == null ? 0 : Integer.parseInt(taskIdString);
+			String taskIdString = props.get(TASK_ID);
+			int taskId = taskIdString == null ? 0 : Integer.parseInt(taskIdString);
 			return new StreamSourceRecordReader(sourceConfig, taskId);
 		}
-		final String idleTimeoutString = props.get(KEYS_IDLE_TIMEOUT);
+		String idleTimeoutString = props.get(KEYS_IDLE_TIMEOUT);
 		return new KeySourceRecordReader(sourceConfig,
 				idleTimeoutString == null ? null : Duration.ofMillis(Long.parseLong(idleTimeoutString)));
 	}
@@ -76,15 +76,15 @@ public class RedisSourceTask extends SourceTask {
 		}
 	}
 
-    @Override
-    public void commit() throws InterruptedException {
-        reader.commit();
-    }
+	@Override
+	public void commit() throws InterruptedException {
+		reader.commit();
+	}
 
-    @Override
-    public void commitRecord(SourceRecord record, RecordMetadata metadata) throws InterruptedException {
-        reader.commitRecord(record, metadata);
-    }
+	@Override
+	public void commitRecord(SourceRecord record, RecordMetadata metadata) throws InterruptedException {
+		reader.commitRecord(record, metadata);
+	}
 
 	@Override
 	public List<SourceRecord> poll() {

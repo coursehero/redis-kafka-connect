@@ -24,7 +24,7 @@ public abstract class AbstractSourceRecordReader<T> implements SourceRecordReade
 		List<T> records;
 		try {
 			records = doPoll();
-		} catch (final Exception e) {
+		} catch (Exception e) {
 			log.error("Could not read messages", e);
 			return null;
 		}
@@ -34,4 +34,5 @@ public abstract class AbstractSourceRecordReader<T> implements SourceRecordReade
 	protected abstract List<T> doPoll() throws Exception;
 
 	protected abstract SourceRecord convert(T input);
+
 }
