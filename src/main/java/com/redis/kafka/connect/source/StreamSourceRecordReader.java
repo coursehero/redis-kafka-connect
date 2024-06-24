@@ -2,21 +2,25 @@ package com.redis.kafka.connect.source;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import org.apache.commons.pool2.impl.GenericObjectPool;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
+import org.apache.kafka.connect.errors.RetriableException;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.springframework.batch.item.ExecutionContext;
 
 import com.redis.spring.batch.RedisItemReader;
 import com.redis.spring.batch.reader.StreamItemReader;
 import com.redis.spring.batch.reader.StreamReaderOptions;
+import com.redis.spring.batch.reader.StreamReaderOptions.AckPolicy;
 
 import io.lettuce.core.AbstractRedisClient;
 import io.lettuce.core.Consumer;
@@ -36,36 +40,80 @@ public class StreamSourceRecordReader extends AbstractSourceRecordReader<StreamM
                        .field(FIELD_BODY, SchemaBuilder.map(Schema.STRING_SCHEMA, Schema.STRING_SCHEMA).build())
                        .field(FIELD_STREAM, Schema.STRING_SCHEMA).name(VALUE_SCHEMA_NAME).build();
 	private final String topic;
-	private final String consumer;
+	private final String consumerName;
+	private final AckPolicy ackPolicy;
 
 	private StreamItemReader<String, String> reader;
 	private AbstractRedisClient client;
 	private GenericObjectPool<StatefulConnection<String, String>> pool;
+	private final ArrayList<StreamMessage<String, String>> pendingMsgs = new ArrayList<>();
 	Clock clock = Clock.systemDefaultZone();
+	StreamMessageRecovery recovery;
 
 	public StreamSourceRecordReader(RedisSourceConfig sourceConfig, int taskId) {
 		super(sourceConfig);
 		this.topic = sourceConfig.getTopicName().replace(RedisSourceConfig.TOKEN_STREAM, sourceConfig.getStreamName());
-		this.consumer = sourceConfig.getStreamConsumerName().replace(RedisSourceConfig.TOKEN_TASK,
+        this.consumerName =
+            sourceConfig.getStreamConsumerName().replace(
+                RedisSourceConfig.TOKEN_TASK,
 				String.valueOf(taskId));
+        this.ackPolicy = convertDeliveryType(config.getStreamDeliveryType());
+	}
+
+	private AckPolicy convertDeliveryType(String deliveryType) {
+		AckPolicy policy = AckPolicy.MANUAL;
+		switch (config.getStreamDeliveryType()) {
+		case RedisSourceConfig.STREAM_DELIVERY_TYPE_AT_MOST_ONCE:
+			policy = AckPolicy.AUTO;
+			break;
+		case RedisSourceConfig.STREAM_DELIVERY_TYPE_AT_LEAST_ONCE:
+			policy = AckPolicy.MANUAL;
+			break;
+		default:
+			throw new IllegalArgumentException("Illegal value for " + RedisSourceConfig.STREAM_DELIVERY_TYPE_CONFIG
+					+ ": " + config.getStreamDeliveryType());
+		}
+		return policy;
 	}
 
 	@Override
-	public void open() throws Exception {
+	public void open(Map<String, Object> offset) throws Exception {
 		RedisURI uri = config.uri();
 		this.client = config.client(uri);
-		this.pool = config.pool(client);
-		this.reader = RedisItemReader
-				.stream(pool, config.getStreamName(), Consumer.from(config.getStreamConsumerGroup(), consumer))
+		this.pool = createPool(config);
+		Consumer<String> consumer = Consumer.from(config.getStreamConsumerGroup(), consumerName);
+		this.reader = RedisItemReader.stream(pool, config.getStreamName(), consumer)
 				.options(StreamReaderOptions.builder().offset(config.getStreamOffset())
-						.block(Duration.ofMillis(config.getStreamBlock())).count(config.getBatchSize()).build())
+						.block(Duration.ofMillis(config.getStreamBlock())).count(config.getBatchSize())
+						.ackPolicy(ackPolicy).build())
 				.build();
 		reader.open(new ExecutionContext());
+		String lastCommitted;
+		if (offset == null) {
+			lastCommitted = null;
+		} else {
+			lastCommitted = (String) offset.get(OFFSET_FIELD);
+		}
+		recovery = new StreamMessageRecovery(pool, consumer, config, ackPolicy, lastCommitted);
+		recovery.initialize();
+	}
+
+	// provided to allow overriding pool creation for testing.
+	GenericObjectPool<StatefulConnection<String, String>> createPool(RedisSourceConfig config) {
+		return config.pool(client);
 	}
 
 	@Override
 	protected List<StreamMessage<String, String>> doPoll() throws Exception {
-		return reader.readMessages();
+		try {
+			List<StreamMessage<String, String>> msgs = recovery.recoverMessages();
+			if (!msgs.isEmpty()) {
+				return msgs;
+			}
+			return reader.readMessages();
+		} catch (Exception e) {
+			throw new RetriableException(e);
+		}
 	}
 
 	@Override
@@ -96,4 +144,31 @@ public class StreamSourceRecordReader extends AbstractSourceRecordReader<StreamM
 				clock.instant().toEpochMilli());
 	}
 
+	@Override
+	public void commitRecord(SourceRecord r, RecordMetadata data) {
+		if (ackPolicy == AckPolicy.MANUAL) {
+			synchronized (pendingMsgs) {
+				pendingMsgs.add(new StreamMessage<String, String>(config.getStreamName(),
+						((String) r.sourceOffset().get(OFFSET_FIELD)), null));
+			}
+		}
+	}
+
+	@Override
+	public void commit() throws InterruptedException {
+		try {
+			if (ackPolicy == AckPolicy.MANUAL) {
+				synchronized (pendingMsgs) {
+					if (!pendingMsgs.isEmpty()) {
+						reader.ack(pendingMsgs);
+						pendingMsgs.clear();
+					}
+				}
+			}
+		} catch (InterruptedException e) {
+			throw e;
+		} catch (Exception e) {
+			throw new RetriableException(e);
+		}
+	}
 }

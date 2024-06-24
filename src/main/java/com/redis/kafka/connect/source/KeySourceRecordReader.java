@@ -51,7 +51,7 @@ public class KeySourceRecordReader extends AbstractSourceRecordReader<DataStruct
 	}
 
 	@Override
-	public void open() throws Exception {
+	public void open(Map<String, Object> offset) throws Exception {
 		RedisURI uri = config.uri();
 		this.client = config.client(uri);
 		this.pool = config.pool(client);
